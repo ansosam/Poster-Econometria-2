@@ -13,8 +13,9 @@ from statsmodels.stats.diagnostic import acorr_ljungbox, het_arch
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.stattools import adfuller, kpss
 
-
-
+import statsmodels.formula.api as smf
+from scipy.stats import kruskal
+from statsmodels.tsa.stattools import acf
 
 #%% 2. Rutas relativas
 RAIZ = Path(__file__).resolve().parent
@@ -37,22 +38,22 @@ print("Observaciones:", len(cafe))
 
 # %% Creación de la serie de tiempo de "exportaciones"
 
-# La nueva serie de tiempo se va a llamar "cafe_serie" y va a tener valores numéricos
+# Serie de tiempo con el nombre "cafe_serie" 
 cafe_serie = cafe["precio"].copy()
 cafe_serie = pd.to_numeric(cafe_serie, errors="coerce")
 cafe_serie = cafe_serie.dropna() # Borrar missing values
 
-# Ver el principio y final de la serie de tiempo
+# Principio y final de la serie de tiempo
 print(cafe_serie.head())
 print(cafe_serie.tail())
 
-# # El tipo de objeto de la base de datos ahora es un Pandas.Series
+# # El tipo de objeto de la base de datos se transforma en un Pandas.Series
 print(type(cafe_serie))
 
-# Ver algunas estadísticas descriptivas de la serie de tiempo 
+# Estadísticas descriptivas de la serie de tiempo 
 print(cafe_serie.describe())
 
-# %%METODOLOGÍA BOX- JENKINS
+# %% 4. METODOLOGÍA BOX- JENKINS
 #1. Identificación
 ##############################
 #Gráficos de la serie temporal 
@@ -94,10 +95,10 @@ plt.show()
 # %% Tests de Raíz Unitaria 
 
 # Test de Augmented Dickey Fuller (ADF)
-adf_result = adfuller(cafe_serie) # Test de Dickey Fuller sin intercepto y tendencia determínistica
+adf_result = adfuller(cafe_serie) # Se utiliza el Test de Dickey Fuller sin intercepto y tendencia determínistica
 
-# Nota: En el test de ADF si no rechazo la H0 la serie no es estacionaria
-#       y si rechazo la H0 la serie es estacionaria. 
+# En el test de ADF, si no se rechaza la H0, entonces la serie no es estacionaria
+#       y si se rechaza la H0 la serie es estacionaria. 
 
 print("=== Test ADF ===")
 print("Estadístico ADF:", adf_result[0])
@@ -116,9 +117,9 @@ else:
 # Test KPSS
 kpss_result = kpss(cafe_serie, regression="c", nlags="auto")
 
-# Nota: En prueba KPSS se interpreta al contario que una prueba ADF.
-#       Si no rechazo la H0 la serie es estacionaria
-#       y si rechazo la H0 la serie es no estacionaria. 
+# En prueba KPSS se interpreta al contario que una prueba ADF.
+#       Si no se rechaza la H0, la serie es estacionaria
+#       y si se rechaza la H0, la serie es no estacionaria. 
 
 print("\n=== Test KPSS ===")
 print("Estadístico KPSS:", kpss_result[0])
@@ -133,7 +134,7 @@ if kpss_result[1] < 0.05:
 else:
     print("KPSS: no rechazamos H0. Según el test, La serie es estacionaria.")
 
-# Nota: Según los resultados de la prueba ADF y KPSS, hay que 
+# Según los resultados de la prueba ADF y KPSS, hay que 
 #       diferenciar la serie.
 # %% Diferenciación de la serie (pues resultó NO estacionaria)
 cafe_serie_diff = cafe_serie.diff().dropna()
@@ -224,17 +225,17 @@ modelo_ar1 = SARIMAX(
 # Objeto tipo "SARIMAX" del paquete statmodels
 type(modelo_ar1)
 
-#  Acá es donde se realiza la estimación del modelo AR(1)
+#  Se realiza la estimación del modelo AR(1)
 estimacion_ar1 = modelo_ar1.fit(disp=False)
 
-# Nota: El método de estimación es máxima verosimilitud 
+# El método de estimación es máxima verosimilitud 
 #       sobre la representación del modelo en un espacio de estados
 
 # Objeto tipo "SARIMAXResultsWrapper"
 type(estimacion_ar1)
 
 # Se imprimen los resultados principales de la estimación
-# E.g. Coeficientes y significancia de los coeficientes
+# Como lo son los coeficientes y significancia de los coeficientes
 print(estimacion_ar1.summary())
 # %%# =========================
 # Paso 3: Validación de supuestos
@@ -257,5 +258,81 @@ plt.show()
 
 # Descripción de los residuales 
 print(residuales.describe())
+
+# %% =========================
+# 5. Prueba de estacionalidad
+# ============================
+
+# Variación logarítmica mensual (serie estacionaria)
+dlog = np.log(cafe_serie).diff().dropna()
+
+meses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+         "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+
+# %% Gráfico por mes: distribución de la variación en cada mes del año
+
+grupos = [dlog[dlog.index.month == m] for m in range(1, 13)]
+
+plt.figure(figsize=(10, 5))
+plt.boxplot(grupos)
+plt.xticks(range(1, 13), meses)
+plt.axhline(0, color="gray", linewidth=1)
+plt.title("Variación logarítmica mensual del precio por mes del año")
+plt.xlabel("Mes")
+plt.ylabel("Δ log(precio)")
+plt.grid(True)
+plt.show()
+
+# Promedio de la variación por mes
+print(dlog.groupby(dlog.index.month).mean().set_axis(meses).round(4))
+
+# %% Autocorrelaciones en los rezagos estacionales
+
+fac = acf(dlog, nlags=36)
+print("FAC en rezagos estacionales:")
+for rezago in [12, 24, 36]:
+    print(f"  Rezago {rezago}: {fac[rezago]:.3f}")
+print(f"  Banda aproximada al 95%: ±{1.96 / np.sqrt(len(dlog)):.3f}")
+
+# Si hubiera una raíz unitaria estacional, la FAC decaería lentamente
+#    en los rezagos 12, 24, 36... Pero los valores pequeños indican que no hace
+#    falta una diferencia estacional (D = 0).
+
+# %% Prueba F: regresión de la variación sobre dummies mensuales
+
+datos = pd.DataFrame({"dlog": dlog, "mes": dlog.index.month})
+
+# Errores estándar HAC (Newey-West): robustos a autocorrelación y a
+# heterocedasticidad (la prueba ARCH mostró volatilidad agrupada)
+reg_mes = smf.ols("dlog ~ C(mes)", data=datos).fit(
+    cov_type="HAC", cov_kwds={"maxlags": 12}
+)
+
+# H0: todos los efectos de los meses son cero (no hay estacionalidad)
+R = np.eye(len(reg_mes.params))[1:]   # todos los coeficientes excepto el intercepto
+prueba_f = reg_mes.f_test(R)
+
+print("=== Prueba F de dummies mensuales ===")
+print(prueba_f)
+
+if float(prueba_f.pvalue) < 0.05:
+    print("Se rechaza H0: hay evidencia de estacionalidad.")
+else:
+    print("No se rechaza H0: no hay evidencia de estacionalidad.")
+
+# %% Prueba de Kruskal-Wallis (no paramétrica)
+
+# No supone normalidad, lo cual es útil porque Jarque-Bera la rechazó.
+# H0: la variación tiene la misma distribución en todos los meses.
+kw = kruskal(*grupos)
+
+print("=== Prueba de Kruskal-Wallis ===")
+print("Estadístico H:", kw.statistic)
+print("p-valor:", kw.pvalue)
+
+if kw.pvalue < 0.05:
+    print("Se rechaza H0: hay evidencia de estacionalidad.")
+else:
+    print("No se rechaza H0: no hay evidencia de estacionalidad.")
 
 # %%
