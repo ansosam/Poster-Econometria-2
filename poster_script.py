@@ -24,6 +24,36 @@ ruta_cafe = DATOS / "cafe_arabica.csv" #ruta al archivo de datos
 RESULTADOS = RAIZ / "resultados"  #carpeta para guardar resultados
 RESULTADOS.mkdir(exist_ok=True)  
 
+#%% Paleta de colores para las gráficas
+COLORES = {
+    "original": "#6F4E37",    # café
+    "diferencia": "#2E86AB",  # azul
+    "log_diff": "#3B8B5A",    # verde
+    "fac": "#C0392B",         # rojo
+    "facp": "#8E44AD",        # morado
+    "residuales": "#E67E22",  # naranja
+    "estacional": "#16A085",  # verde azulado
+    "banda": "#7F8C8D",       # gris para bandas de confianza
+}
+
+
+def colorear_correlograma(ax, color):
+    """Aplica un color a las barras, marcadores y banda de confianza de un FAC/FACP."""
+    for linea in ax.lines:
+        if linea.get_marker() not in (None, "None", ""):
+            linea.set_color(color)
+            linea.set_markerfacecolor(color)
+            linea.set_markeredgecolor(color)
+        else:  # línea horizontal en cero
+            linea.set_color("black")
+            linea.set_linewidth(0.8)
+    for coleccion in ax.collections:
+        if coleccion.__class__.__name__ == "LineCollection":
+            coleccion.set_color(color)
+        else:  # banda de confianza
+            coleccion.set_facecolor(COLORES["banda"])
+            coleccion.set_alpha(0.2)
+
 #%% Cargar Datos
 # 3. Datos cargados
 cafe = pd.read_csv(ruta_cafe,
@@ -58,11 +88,11 @@ print(cafe_serie.describe())
 ##############################
 #Gráficos de la serie temporal 
 plt.figure(figsize=(12, 6))
-plt.plot(cafe_serie, linewidth=2)
+plt.plot(cafe_serie, linewidth=2, color=COLORES["original"])
 plt.title("Precio internacional del café arábigo (USD/kg, nominal)")
 plt.xlabel("Fecha")
 plt.ylabel("USD por kilo")
-plt.grid(True)
+plt.grid(True, alpha=0.3)
 plt.savefig(RESULTADOS / "serie_original.png", dpi=300)
 plt.show()
 
@@ -78,6 +108,7 @@ plot_acf(
     ax=axes[0]
 )
 
+colorear_correlograma(axes[0], COLORES["fac"])
 axes[0].set_title("FAC Precios Históricos del Café Arábigo")
 
 plot_pacf(
@@ -87,6 +118,7 @@ plot_pacf(
     ax=axes[1]
 )
 
+colorear_correlograma(axes[1], COLORES["facp"])
 axes[1].set_title("FACP Precios Históricos del Café Arábigo")
 
 plt.tight_layout()
@@ -141,11 +173,11 @@ cafe_serie_diff = cafe_serie.diff().dropna()
 
 # Gráfica de la serie de tiempo de la "diferencia exportaciones tradicionales"
 plt.figure(figsize=(10, 5))
-plt.plot(cafe_serie_diff)
+plt.plot(cafe_serie_diff, color=COLORES["diferencia"])
 plt.title("Serie diferenciada")
 plt.xlabel("Año")
 plt.ylabel("Precio")
-plt.grid(True)
+plt.grid(True, alpha=0.3)
 plt.show()
 # %% Diferencia del logaritmo
 
@@ -153,11 +185,11 @@ cafe_serie_log_diff = np.log(cafe_serie).diff().dropna()
 
 # Gráfica de la serie de tiempo de la "diferencia del logaritmo de exportaciones tradicionales"
 plt.figure(figsize=(10, 5))
-plt.plot(cafe_serie_log_diff)
+plt.plot(cafe_serie_log_diff, color=COLORES["log_diff"])
 plt.title("Diferencia del logaritmo de la serie original")
 plt.xlabel("Año")
 plt.ylabel("Precio")
-plt.grid(True)
+plt.grid(True, alpha=0.3)
 plt.show()
 
 # %% FAC y FACP de la diferencia del logaritmo
@@ -172,6 +204,7 @@ plot_acf(
     ax=axes[0]
 )
 
+colorear_correlograma(axes[0], COLORES["fac"])
 axes[0].set_title("FAC de la diferencia del logaritmo")
 
 plot_pacf(
@@ -181,6 +214,7 @@ plot_pacf(
     ax=axes[1]
 )
 
+colorear_correlograma(axes[1], COLORES["facp"])
 axes[1].set_title("FACP de la diferencia del logaritmo")
 
 plt.tight_layout()
@@ -249,11 +283,12 @@ type(residuales)
 
 # Gráfica de los residuales (deberían comportarse como ruido blanco)
 plt.figure(figsize=(10, 5))
-plt.plot(residuales.iloc[1:-1])
+plt.plot(residuales.iloc[1:-1], color=COLORES["residuales"])
+plt.axhline(0, color="black", linewidth=0.8, linestyle="--")
 plt.title("Residuales del modelo AR(1)")
 plt.xlabel("Fecha")
 plt.ylabel("Precio")
-plt.grid(True)
+plt.grid(True, alpha=0.3)
 plt.show()
 
 # Descripción de los residuales 
@@ -274,13 +309,21 @@ meses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
 grupos = [dlog[dlog.index.month == m] for m in range(1, 13)]
 
 plt.figure(figsize=(10, 5))
-plt.boxplot(grupos)
+plt.boxplot(
+    grupos,
+    patch_artist=True,
+    boxprops=dict(facecolor=COLORES["estacional"], alpha=0.6, edgecolor=COLORES["estacional"]),
+    medianprops=dict(color="black"),
+    whiskerprops=dict(color=COLORES["estacional"]),
+    capprops=dict(color=COLORES["estacional"]),
+    flierprops=dict(markeredgecolor=COLORES["estacional"]),
+)
 plt.xticks(range(1, 13), meses)
 plt.axhline(0, color="gray", linewidth=1)
 plt.title("Variación logarítmica mensual del precio por mes del año")
 plt.xlabel("Mes")
 plt.ylabel("Δ log(precio)")
-plt.grid(True)
+plt.grid(True, alpha=0.3)
 plt.show()
 
 # Promedio de la variación por mes
