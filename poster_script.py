@@ -320,7 +320,11 @@ plt.boxplot(
 )
 plt.xticks(range(1, 13), meses)
 plt.axhline(0, color="gray", linewidth=1)
-plt.title("Variación logarítmica mensual del precio por mes del año")
+plt.title(
+    "Estacionalidad del precio del café arábigo (1960–2026)\n"
+    "Variación logarítmica mensual agrupada por mes del año",
+    fontsize=12,
+)
 plt.xlabel("Mes")
 plt.ylabel("Δ log(precio)")
 plt.grid(True, alpha=0.3)
