@@ -244,7 +244,8 @@ for orden in candidatos:
 print(pd.DataFrame(filas).sort_values("BIC"))
 #%% Identificación mediante criterios de Información
 #El modelo ARIMA(1, 1, 0) es el que tiene el menor BIC y AIC
-#Sin embargo, ningún modelo pasa la prueba de Ljung-Box a 12 y 24 rezagos.
+#A 12 rezagos, tres de los cuatro modelos pasan la prueba de Ljung-Box (todos menos ARIMA(0, 1, 1)).
+#Sin embargo, ningún modelo pasa la prueba de Ljung-Box a 24 rezagos.
 # %% =========================
 # Paso 2: Estimación
 # ============================
