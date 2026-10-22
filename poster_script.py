@@ -383,4 +383,43 @@ if kw.pvalue < 0.05:
 else:
     print("No se rechaza H0: no hay evidencia de estacionalidad.")
 
-# %%
+# %%# %% =========================
+# PASO 4: Pronóstico
+# ============================
+
+# A partir de la estimación del AR(1) se realizó el pronóstico
+
+# Protonóstico 12 pasos adelante
+pronostico_log = estimacion_ar1.get_forecast(steps=12)
+
+# Pronóstico puntual e intervalos de predicción del logaritmo de las exportaciones tradicionales
+pronostico_puntual_log = pronostico_log.predicted_mean
+varianza_pronostico_log = pronostico_log.var_pred_mean
+intervalos_log = pronostico_log.conf_int()
+
+# Al retransformar desde logaritmos, exp(E[log(y)]) corresponde a la mediana.
+# Para obtener la media en niveles se usa la corrección por sesgo:
+# E[y] = exp(mu + 0.5 * sigma^2), bajo normalidad en la escala logarítmica.
+pronostico_nivel = np.exp(pronostico_puntual_log + 0.5 * varianza_pronostico_log)
+intervalos_nivel = np.exp(intervalos_log)
+
+tabla_pronostico = pd.DataFrame({
+    "pronostico": pronostico_nivel,
+    "limite_inferior": intervalos_nivel.iloc[:, 0],
+    "limite_superior": intervalos_nivel.iloc[:, 1]
+})
+
+print(tabla_pronostico)
+
+# Gráfica del pronóstico
+plt.figure(figsize=(10, 5))
+plt.plot(cafe_serie, label="Datos históricos")
+plt.plot(pronostico_nivel, label="Pronóstico", color="orange")
+plt.fill_between(
+    pronostico_nivel.index,
+    intervalos_nivel.iloc[:, 0],
+    intervalos_nivel.iloc[:, 1],
+    color="orange",
+    alpha=0.3,
+    label="Intervalo de confianza"
+)
