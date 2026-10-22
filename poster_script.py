@@ -17,7 +17,7 @@ import statsmodels.formula.api as smf
 from scipy.stats import kruskal
 from statsmodels.tsa.stattools import acf
 
-#%% 2. Rutas relativas
+#%% Rutas relativas
 RAIZ = Path(__file__).resolve().parent
 DATOS = RAIZ / "datos"
 ruta_cafe = DATOS / "cafe_arabica.csv" #ruta al archivo de datos   
@@ -55,7 +55,7 @@ def colorear_correlograma(ax, color):
             coleccion.set_alpha(0.2)
 
 #%% Cargar Datos
-# 3. Datos cargados
+# Datos cargados
 cafe = pd.read_csv(ruta_cafe,
                     sep=";",
                     index_col="fecha",
@@ -83,7 +83,7 @@ print(type(cafe_serie))
 # Estadísticas descriptivas de la serie de tiempo 
 print(cafe_serie.describe())
 
-# %% 4. METODOLOGÍA BOX- JENKINS
+# %% METODOLOGÍA BOX- JENKINS
 #1. Identificación
 ##############################
 #Gráficos de la serie temporal 
@@ -248,7 +248,7 @@ print(pd.DataFrame(filas).sort_values("BIC"))
 #Sin embargo, ningún modelo pasa la prueba de Ljung-Box a 24 rezagos.
 
 # %% =========================
-# 5. Prueba de estacionalidad
+# Prueba de estacionalidad
 # ============================
 
 # Variación logarítmica mensual (serie estacionaria)
@@ -385,7 +385,7 @@ plt.show()
 print(residuales.describe())
 
 # %%# %% =========================
-# PASO 3: Pronóstico
+# PASO 4: Pronóstico
 # ============================
 
 # A partir de la estimación del AR(1) se realizó el pronóstico
@@ -430,15 +430,15 @@ plt.fill_between(
 # ============================
 
 # Los intervalos anteriores suponen errores normales. Como la prueba de
-# Jarque-Bera rechaza la normalidad (colas pesadas), se construyen
-# intervalos remuestreando los residuales del propio modelo:
+# Jarque-Bera rechaza la normalidad, se construyen
+# intervalos remuestreando los residuales del propio modelo
 #   1. Se toman los residuales estimados y se centran en cero.
 #   2. Se simulan B trayectorias futuras del AR(1) sobre la variación logarítmica:
 #      r_{T+h} = phi * r_{T+h-1} + e*, con e* sacado con reemplazo de los residuales.
 #   3. Se acumulan las variaciones sobre el último log(precio) observado.
 #   4. Los percentiles 2.5% y 97.5% de las trayectorias son el intervalo del 95%.
 
-# Nota: este bootstrap mantiene fijo el coeficiente estimado (phi), así que
+# Este bootstrap mantiene fijo el coeficiente estimado (phi), así que
 #       no incluye la incertidumbre de la estimación de los parámetros.
 
 pasos = len(pronostico_nivel)  # Mismo horizonte que el pronóstico anterior
