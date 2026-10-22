@@ -424,3 +424,88 @@ plt.fill_between(
     alpha=0.3,
     label="Intervalo de confianza"
 )
+
+# %% =========================
+# Intervalos de predicción por bootstrap
+# ============================
+
+# Los intervalos anteriores suponen errores normales. Como la prueba de
+# Jarque-Bera rechaza la normalidad (colas pesadas), se construyen
+# intervalos remuestreando los residuales del propio modelo:
+#   1. Se toman los residuales estimados y se centran en cero.
+#   2. Se simulan B trayectorias futuras del AR(1) sobre la variación logarítmica:
+#      r_{T+h} = phi * r_{T+h-1} + e*, con e* sacado con reemplazo de los residuales.
+#   3. Se acumulan las variaciones sobre el último log(precio) observado.
+#   4. Los percentiles 2.5% y 97.5% de las trayectorias son el intervalo del 95%.
+
+# Nota: este bootstrap mantiene fijo el coeficiente estimado (phi), así que
+#       no incluye la incertidumbre de la estimación de los parámetros.
+
+pasos = len(pronostico_nivel)  # Mismo horizonte que el pronóstico anterior
+B_pron = 5000  # Número de trayectorias simuladas
+rng_pron = np.random.default_rng(2026)  # Semilla para que el resultado sea reproducible
+
+phi_pron = estimacion_ar1.params["ar.L1"]
+residuos_boot = residuales.iloc[1:].values  # Se quita el primer residual (inicialización)
+residuos_boot = residuos_boot - residuos_boot.mean()
+
+log_precio = np.log(cafe_serie)
+ultimo_log = log_precio.iloc[-1]
+ultima_variacion = log_precio.diff().iloc[-1]
+
+# Cada fila es una trayectoria y cada columna un mes del horizonte
+choques = rng_pron.choice(residuos_boot, size=(B_pron, pasos), replace=True)
+variaciones = np.empty((B_pron, pasos))
+variaciones[:, 0] = phi_pron * ultima_variacion + choques[:, 0]
+for h in range(1, pasos):
+    variaciones[:, h] = phi_pron * variaciones[:, h - 1] + choques[:, h]
+
+trayectorias = np.exp(ultimo_log + np.cumsum(variaciones, axis=1))
+
+pronostico_boot = pd.Series(trayectorias.mean(axis=0), index=pronostico_nivel.index)
+intervalos_boot = pd.DataFrame({
+    "inferior": np.percentile(trayectorias, 2.5, axis=0),
+    "superior": np.percentile(trayectorias, 97.5, axis=0),
+}, index=pronostico_nivel.index)
+
+tabla_bootstrap = pd.DataFrame({
+    "pronostico_normal": pronostico_nivel,
+    "inferior_normal": intervalos_nivel.iloc[:, 0],
+    "superior_normal": intervalos_nivel.iloc[:, 1],
+    "pronostico_bootstrap": pronostico_boot,
+    "inferior_bootstrap": intervalos_boot["inferior"],
+    "superior_bootstrap": intervalos_boot["superior"],
+}).round(2)
+tabla_bootstrap.index = tabla_bootstrap.index.strftime("%Y-%m")
+
+print("=== Pronóstico con intervalos normales y por bootstrap (USD/kg) ===")
+print(tabla_bootstrap.to_string())
+
+# Gráfica: últimos 10 años + pronóstico con los dos intervalos
+historia_reciente = cafe_serie.loc[cafe_serie.index >= cafe_serie.index[-1] - pd.DateOffset(years=10)]
+
+plt.figure(figsize=(12, 6))
+plt.plot(historia_reciente, color=COLORES["original"], linewidth=2, label="Precio observado")
+plt.plot(pronostico_nivel, color="black", linewidth=2, linestyle="--", label="Pronóstico")
+plt.fill_between(
+    pronostico_nivel.index,
+    intervalos_nivel.iloc[:, 0],
+    intervalos_nivel.iloc[:, 1],
+    color=COLORES["banda"],
+    alpha=0.25,
+    label="IC 95% normal",
+)
+plt.plot(intervalos_boot["inferior"], color=COLORES["fac"], linewidth=1.5, label="IC 95% bootstrap")
+plt.plot(intervalos_boot["superior"], color=COLORES["fac"], linewidth=1.5)
+plt.axvline(cafe_serie.index[-1], color=COLORES["banda"], linewidth=1, linestyle=":")
+plt.title(
+    "Pronóstico del precio del café arábigo a 12 meses\n"
+    f"Intervalo normal frente a intervalo por bootstrap de residuales ({B_pron} trayectorias)",
+    fontsize=12,
+)
+plt.xlabel("Fecha")
+plt.ylabel("USD por kilo")
+plt.legend(loc="upper left")
+plt.grid(True, alpha=0.3)
+plt.savefig(RESULTADOS / "pronostico_bootstrap.png", dpi=300)
+plt.show()
