@@ -246,54 +246,6 @@ print(pd.DataFrame(filas).sort_values("BIC"))
 #El modelo ARIMA(1, 1, 0) es el que tiene el menor BIC y AIC
 #A 12 rezagos, tres de los cuatro modelos pasan la prueba de Ljung-Box (todos menos ARIMA(0, 1, 1)).
 #Sin embargo, ningún modelo pasa la prueba de Ljung-Box a 24 rezagos.
-# %% =========================
-# Paso 2: Estimación
-# ============================
-modelo_ar1 = SARIMAX(
-    np.log(cafe_serie),
-    order=(1, 1, 0),
-    trend="n",
-    enforce_stationarity=False,
-    enforce_invertibility=False
-)
-
-# Objeto tipo "SARIMAX" del paquete statmodels
-type(modelo_ar1)
-
-#  Se realiza la estimación del modelo AR(1)
-estimacion_ar1 = modelo_ar1.fit(disp=False)
-
-# El método de estimación es máxima verosimilitud 
-#       sobre la representación del modelo en un espacio de estados
-
-# Objeto tipo "SARIMAXResultsWrapper"
-type(estimacion_ar1)
-
-# Se imprimen los resultados principales de la estimación
-# Como lo son los coeficientes y significancia de los coeficientes
-print(estimacion_ar1.summary())
-# %%# =========================
-# Paso 3: Validación de supuestos
-# ============================
-
-# Residuales del modelo
-residuales = estimacion_ar1.resid.dropna()
-
-# Los residuales son un objeto tipo Pandas.Series
-type(residuales)
-
-# Gráfica de los residuales (deberían comportarse como ruido blanco)
-plt.figure(figsize=(10, 5))
-plt.plot(residuales.iloc[1:-1], color=COLORES["residuales"])
-plt.axhline(0, color="black", linewidth=0.8, linestyle="--")
-plt.title("Residuales del modelo AR(1)")
-plt.xlabel("Fecha")
-plt.ylabel("Precio")
-plt.grid(True, alpha=0.3)
-plt.show()
-
-# Descripción de los residuales 
-print(residuales.describe())
 
 # %% =========================
 # 5. Prueba de estacionalidad
@@ -383,8 +335,57 @@ if kw.pvalue < 0.05:
 else:
     print("No se rechaza H0: no hay evidencia de estacionalidad.")
 
+# %% =========================
+# Paso 2: Estimación
+# ============================
+modelo_ar1 = SARIMAX(
+    np.log(cafe_serie),
+    order=(1, 1, 0),
+    trend="n",
+    enforce_stationarity=False,
+    enforce_invertibility=False
+)
+
+# Objeto tipo "SARIMAX" del paquete statmodels
+type(modelo_ar1)
+
+#  Se realiza la estimación del modelo AR(1)
+estimacion_ar1 = modelo_ar1.fit(disp=False)
+
+# El método de estimación es máxima verosimilitud 
+#       sobre la representación del modelo en un espacio de estados
+
+# Objeto tipo "SARIMAXResultsWrapper"
+type(estimacion_ar1)
+
+# Se imprimen los resultados principales de la estimación
+# Como lo son los coeficientes y significancia de los coeficientes
+print(estimacion_ar1.summary())
+# %%# =========================
+# Paso 3: Validación de supuestos
+# ============================
+
+# Residuales del modelo
+residuales = estimacion_ar1.resid.dropna()
+
+# Los residuales son un objeto tipo Pandas.Series
+type(residuales)
+
+# Gráfica de los residuales (deberían comportarse como ruido blanco)
+plt.figure(figsize=(10, 5))
+plt.plot(residuales.iloc[1:-1], color=COLORES["residuales"])
+plt.axhline(0, color="black", linewidth=0.8, linestyle="--")
+plt.title("Residuales del modelo AR(1)")
+plt.xlabel("Fecha")
+plt.ylabel("Precio")
+plt.grid(True, alpha=0.3)
+plt.show()
+
+# Descripción de los residuales 
+print(residuales.describe())
+
 # %%# %% =========================
-# PASO 4: Pronóstico
+# PASO 3: Pronóstico
 # ============================
 
 # A partir de la estimación del AR(1) se realizó el pronóstico
