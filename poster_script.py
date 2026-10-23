@@ -395,6 +395,42 @@ plt.show()
 # Descripción de los residuales
 print(residuales.describe())
 
+# %% FAC y FACP de los residuales
+
+# Si el modelo capturó toda la dinámica, ninguna barra debería salir
+# de la banda de confianza (los residuales serían ruido blanco).
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+plot_acf(
+    residuales.iloc[1:],  # Se quita el primer residual (inicialización)
+    lags=24,
+    alpha=0.05,
+    bartlett_confint=False,
+    ax=axes[0]
+)
+
+colorear_correlograma(axes[0], COLORES["fac"])
+axes[0].set_title("FAC de los residuales del ARIMA(1,1,0)")
+
+plot_pacf(
+    residuales.iloc[1:],
+    lags=24,
+    alpha=0.05,
+    ax=axes[1]
+)
+
+colorear_correlograma(axes[1], COLORES["facp"])
+axes[1].set_title("FACP de los residuales del ARIMA(1,1,0)")
+
+plt.tight_layout()
+plt.savefig(RESULTADOS / "fac_facp_residuales.png", dpi=300)
+plt.show()
+
+# Casi todas las barras están dentro de la banda (±0.093). Solo los rezagos 16
+#       (FAC y FACP) y 17 (FACP) la tocan apenas, algo esperable por azar con
+#       24 rezagos al 5%. La prueba de Ljung-Box confirma que no hay
+#       autocorrelación conjunta.
+
 # %% Pruebas sobre los residuales
 
 res_validos = residuales.iloc[1:]  # Se quita el primer residual (inicialización)
