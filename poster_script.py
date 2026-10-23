@@ -17,11 +17,50 @@ from scipy.stats import kruskal
 from statsmodels.tsa.stattools import acf
 
 #%% Rutas relativas
-RAIZ = Path(__file__).resolve().parent
-DATOS = RAIZ / "datos"
-ruta_cafe = DATOS / "cafe_arabica.csv" #ruta al archivo de datos   
-RESULTADOS = RAIZ / "resultados"  #carpeta para guardar resultados
-RESULTADOS.mkdir(exist_ok=True)  
+
+# Nombre de la base de datos (sin extensión) y periodo de la muestra
+NOMBRE_DATOS = "cafe_arabica"
+INICIO_MUESTRA = "1990-01"
+
+# Carpeta del script. En Jupyter o en la ventana interactiva de VS Code
+# __file__ no existe, así que se usa la carpeta desde donde se corre.
+try:
+    CARPETA_SCRIPT = Path(__file__).resolve().parent
+except NameError:
+    CARPETA_SCRIPT = Path.cwd()
+
+
+def buscar_datos(nombre=NOMBRE_DATOS):
+    """Busca la base de datos sin depender de desde qué carpeta se corra el código.
+
+    Revisa la carpeta "datos" junto al script, la carpeta actual y hasta tres
+    carpetas hacia arriba. Acepta .csv o .xlsx y no distingue mayúsculas.
+    """
+    bases = [CARPETA_SCRIPT, Path.cwd(), *list(Path.cwd().parents)[:3]]
+    carpetas = []
+    for base in bases:
+        carpetas += [base / "datos", base, base / "Poster-Econometria-2" / "datos"]
+
+    for extension in [".csv", ".xlsx"]:
+        buscado = (nombre + extension).lower()
+        for carpeta in carpetas:
+            if not carpeta.is_dir():
+                continue
+            for archivo in carpeta.iterdir():
+                if archivo.name.lower() == buscado:
+                    return archivo
+
+    revisadas = "\n  ".join(str(c) for c in dict.fromkeys(carpetas))
+    raise FileNotFoundError(
+        f"No se encontró '{nombre}.csv' ni '{nombre}.xlsx'. Carpetas revisadas:\n  {revisadas}"
+    )
+
+
+ruta_cafe = buscar_datos()  # Ruta al archivo de datos
+RAIZ = ruta_cafe.parent.parent if ruta_cafe.parent.name.lower() == "datos" else ruta_cafe.parent
+RESULTADOS = RAIZ / "resultados"  # Carpeta para guardar resultados
+RESULTADOS.mkdir(exist_ok=True)
+print("Datos:", ruta_cafe)
 
 #%% Paleta de colores para las gráficas
 COLORES = {
@@ -54,14 +93,23 @@ def colorear_correlograma(ax, color):
             coleccion.set_alpha(0.2)
 
 #%% Cargar Datos
-# Datos cargados
-cafe = pd.read_csv(ruta_cafe,
-                    sep=";",
-                    index_col="fecha",
-                    parse_dates=True,
-                    date_format="%Y-%m"
-)
-cafe = cafe.asfreq("MS") 
+
+# Se lee todo como texto para que funcione igual con CSV o Excel, con
+# separador ";" o "," y con cualquier versión de pandas.
+if ruta_cafe.suffix.lower() == ".csv":
+    cafe = pd.read_csv(ruta_cafe, sep=None, engine="python", dtype=str, encoding="utf-8-sig")
+else:
+    cafe = pd.read_excel(ruta_cafe, sheet_name=0, dtype=str)
+
+cafe.columns = cafe.columns.str.strip().str.lower()
+
+# Fecha en formato AAAA-MM y precio con punto decimal (por si Excel guardó "0,94")
+cafe["fecha"] = pd.to_datetime(cafe["fecha"].str.strip().str[:7], format="%Y-%m")
+cafe["precio"] = cafe["precio"].str.strip().str.replace(",", ".", regex=False)
+
+cafe = cafe.set_index("fecha").sort_index()
+cafe = cafe.loc[INICIO_MUESTRA:]  # Muestra del análisis: desde enero de 1990
+cafe = cafe.asfreq("MS")
 print(cafe.tail())
 print("Observaciones:", len(cafe))
 
@@ -479,8 +527,11 @@ else:
 
 # A partir de la estimación del AR(1) se realizó el pronóstico
 
-# Pronóstico 12 pasos adelante
-pronostico_log = estimacion_ar1.get_forecast(steps=12)
+# Horizonte del pronóstico (en meses)
+HORIZONTE = 10
+
+# Pronóstico 10 pasos adelante
+pronostico_log = estimacion_ar1.get_forecast(steps=HORIZONTE)
 
 # Pronóstico puntual e intervalos de predicción del logaritmo del precio del café
 pronostico_puntual_log = pronostico_log.predicted_mean
@@ -513,7 +564,7 @@ plt.fill_between(
     alpha=0.3,
     label="Intervalo de confianza"
 )
-plt.title("Pronóstico del precio del café arábigo a 12 meses (ARIMA(1,1,0))")
+plt.title(f"Pronóstico del precio del café arábigo a {HORIZONTE} meses (ARIMA(1,1,0))")
 plt.xlabel("Fecha")
 plt.ylabel("USD por kilo")
 plt.legend(loc="upper left")
@@ -595,7 +646,7 @@ plt.plot(intervalos_boot["inferior"], color=COLORES["fac"], linewidth=1.5, label
 plt.plot(intervalos_boot["superior"], color=COLORES["fac"], linewidth=1.5)
 plt.axvline(cafe_serie.index[-1], color=COLORES["banda"], linewidth=1, linestyle=":")
 plt.title(
-    "Pronóstico del precio del café arábigo a 12 meses\n"
+    f"Pronóstico del precio del café arábigo a {HORIZONTE} meses\n"
     f"Intervalo normal frente a intervalo por bootstrap de residuales ({B_pron} trayectorias)",
     fontsize=12,
 )
