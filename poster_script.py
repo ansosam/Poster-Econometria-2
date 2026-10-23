@@ -12,62 +12,135 @@ from statsmodels.stats.diagnostic import acorr_ljungbox, het_arch
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.stattools import adfuller, kpss
 
-
-
+import statsmodels.formula.api as smf
+from scipy.stats import kruskal
+from statsmodels.tsa.stattools import acf
 
 #%% Rutas relativas
-RAIZ = Path(__file__).resolve().parent
-DATOS = RAIZ / "datos"
-ruta_cafe = DATOS / "cafe_arabica.csv" #ruta al archivo de datos   
-RESULTADOS = RAIZ / "resultados"  #carpeta para guardar resultados
-RESULTADOS.mkdir(exist_ok=True)  
+
+# Nombre de la base de datos (sin extensión) y periodo de la muestra
+NOMBRE_DATOS = "cafe_arabica"
+INICIO_MUESTRA = "1990-01"
+
+# Carpeta del script. En Jupyter o en la ventana interactiva de VS Code
+# __file__ no existe, así que se usa la carpeta desde donde se corre.
+try:
+    CARPETA_SCRIPT = Path(__file__).resolve().parent
+except NameError:
+    CARPETA_SCRIPT = Path.cwd()
+
+
+def buscar_datos(nombre=NOMBRE_DATOS):
+    """Busca la base de datos sin depender de desde qué carpeta se corra el código.
+
+    Revisa la carpeta "datos" junto al script, la carpeta actual y hasta tres
+    carpetas hacia arriba. Acepta .csv o .xlsx y no distingue mayúsculas.
+    """
+    bases = [CARPETA_SCRIPT, Path.cwd(), *list(Path.cwd().parents)[:3]]
+    carpetas = []
+    for base in bases:
+        carpetas += [base / "datos", base, base / "Poster-Econometria-2" / "datos"]
+
+    for extension in [".csv", ".xlsx"]:
+        buscado = (nombre + extension).lower()
+        for carpeta in carpetas:
+            if not carpeta.is_dir():
+                continue
+            for archivo in carpeta.iterdir():
+                if archivo.name.lower() == buscado:
+                    return archivo
+
+    revisadas = "\n  ".join(str(c) for c in dict.fromkeys(carpetas))
+    raise FileNotFoundError(
+        f"No se encontró '{nombre}.csv' ni '{nombre}.xlsx'. Carpetas revisadas:\n  {revisadas}"
+    )
+
+
+ruta_cafe = buscar_datos()  # Ruta al archivo de datos
+RAIZ = ruta_cafe.parent.parent if ruta_cafe.parent.name.lower() == "datos" else ruta_cafe.parent
+RESULTADOS = RAIZ / "resultados"  # Carpeta para guardar resultados
+RESULTADOS.mkdir(exist_ok=True)
+print("Datos:", ruta_cafe)
+
+#%% Paleta de colores para las gráficas
+COLORES = {
+    "original": "#6F4E37",    # café
+    "diferencia": "#2E86AB",  # azul
+    "log_diff": "#3B8B5A",    # verde
+    "fac": "#C0392B",         # rojo
+    "facp": "#8E44AD",        # morado
+    "residuales": "#E67E22",  # naranja
+    "estacional": "#16A085",  # verde azulado
+    "banda": "#7F8C8D",       # gris para bandas de confianza
+}
+
+
+def colorear_correlograma(ax, color):
+    """Aplica un color a las barras, marcadores y banda de confianza de un FAC/FACP."""
+    for linea in ax.lines:
+        if linea.get_marker() not in (None, "None", ""):
+            linea.set_color(color)
+            linea.set_markerfacecolor(color)
+            linea.set_markeredgecolor(color)
+        else:  # línea horizontal en cero
+            linea.set_color("black")
+            linea.set_linewidth(0.8)
+    for coleccion in ax.collections:
+        if coleccion.__class__.__name__ == "LineCollection":
+            coleccion.set_color(color)
+        else:  # banda de confianza
+            coleccion.set_facecolor(COLORES["banda"])
+            coleccion.set_alpha(0.2)
 
 #%% Cargar Datos
-# Datos cargados
-cafe = pd.read_csv(ruta_cafe,
-                    sep=";",
-                    index_col="fecha",
-                    parse_dates=True,
-                    date_format="%Y-%m"
-)
-cafe = cafe.asfreq("MS") 
+
+# Se lee todo como texto para que funcione igual con CSV o Excel, con
+# separador ";" o "," y con cualquier versión de pandas.
+if ruta_cafe.suffix.lower() == ".csv":
+    cafe = pd.read_csv(ruta_cafe, sep=None, engine="python", dtype=str, encoding="utf-8-sig")
+else:
+    cafe = pd.read_excel(ruta_cafe, sheet_name=0, dtype=str)
+
+cafe.columns = cafe.columns.str.strip().str.lower()
+
+# Fecha en formato AAAA-MM y precio con punto decimal (por si Excel guardó "0,94")
+cafe["fecha"] = pd.to_datetime(cafe["fecha"].str.strip().str[:7], format="%Y-%m")
+cafe["precio"] = cafe["precio"].str.strip().str.replace(",", ".", regex=False)
+
+cafe = cafe.set_index("fecha").sort_index()
+cafe = cafe.loc[INICIO_MUESTRA:]  # Muestra del análisis: desde enero de 1990
+cafe = cafe.asfreq("MS")
 print(cafe.tail())
 print("Observaciones:", len(cafe))
 
 # %% Creación de la serie de tiempo del precio del café
 
-# La nueva serie de tiempo se va a llamar "cafe_serie" y va a tener valores numéricos
+# Serie de tiempo con el nombre "cafe_serie" 
 cafe_serie = cafe["precio"].copy()
 cafe_serie = pd.to_numeric(cafe_serie, errors="coerce")
 cafe_serie = cafe_serie.dropna() # Borrar missing values
 
-# Ver el principio y final de la serie de tiempo
+# Principio y final de la serie de tiempo
 print(cafe_serie.head())
 print(cafe_serie.tail())
 
-# # El tipo de objeto de la base de datos ahora es un Pandas.Series
+# # El tipo de objeto de la base de datos se transforma en un Pandas.Series
 print(type(cafe_serie))
 
-# Ver algunas estadísticas descriptivas de la serie de tiempo 
+# Estadísticas descriptivas de la serie de tiempo 
 print(cafe_serie.describe())
 
-<<<<<<< Updated upstream
 # %% METODOLOGÍA BOX-JENKINS
 # =========================
 # Paso 1: Identificación
 # ============================
-=======
-# %%METODOLOGÍA BOX- JENKINS
-#1. Identificación
-##############################
->>>>>>> Stashed changes
 #Gráficos de la serie temporal 
 plt.figure(figsize=(12, 6))
-plt.plot(cafe_serie, linewidth=2)
+plt.plot(cafe_serie, linewidth=2, color=COLORES["original"])
 plt.title("Precio internacional del café arábigo (USD/kg, nominal)")
 plt.xlabel("Fecha")
 plt.ylabel("USD por kilo")
-plt.grid(True)
+plt.grid(True, alpha=0.3)
 plt.savefig(RESULTADOS / "serie_original.png", dpi=300)
 plt.show()
 
@@ -83,6 +156,7 @@ plot_acf(
     ax=axes[0]
 )
 
+colorear_correlograma(axes[0], COLORES["fac"])
 axes[0].set_title("FAC Precios Históricos del Café Arábigo")
 
 plot_pacf(
@@ -92,6 +166,7 @@ plot_pacf(
     ax=axes[1]
 )
 
+colorear_correlograma(axes[1], COLORES["facp"])
 axes[1].set_title("FACP Precios Históricos del Café Arábigo")
 
 plt.tight_layout()
@@ -101,14 +176,10 @@ plt.show()
 # %% Tests de Raíz Unitaria 
 
 # Test de Augmented Dickey Fuller (ADF)
-<<<<<<< Updated upstream
 adf_result = adfuller(cafe_serie) # Test de Dickey Fuller con intercepto y sin tendencia determinística
-=======
-adf_result = adfuller(cafe_serie) # Test de Dickey Fuller sin intercepto y tendencia determínistica
->>>>>>> Stashed changes
 
-# Nota: En el test de ADF si no rechazo la H0 la serie no es estacionaria
-#       y si rechazo la H0 la serie es estacionaria. 
+# En el test de ADF, si no se rechaza la H0, entonces la serie no es estacionaria
+#       y si se rechaza la H0 la serie es estacionaria. 
 
 print("=== Test ADF ===")
 print("Estadístico ADF:", adf_result[0])
@@ -127,15 +198,9 @@ else:
 # Test KPSS
 kpss_result = kpss(cafe_serie, regression="c", nlags="auto")
 
-<<<<<<< Updated upstream
 # En prueba KPSS se interpreta al contrario que una prueba ADF.
 #       Si no se rechaza la H0, la serie es estacionaria
 #       y si se rechaza la H0, la serie es no estacionaria. 
-=======
-# Nota: En prueba KPSS se interpreta al contario que una prueba ADF.
-#       Si no rechazo la H0 la serie es estacionaria
-#       y si rechazo la H0 la serie es no estacionaria. 
->>>>>>> Stashed changes
 
 print("\n=== Test KPSS ===")
 print("Estadístico KPSS:", kpss_result[0])
@@ -150,24 +215,19 @@ if kpss_result[1] < 0.05:
 else:
     print("KPSS: no rechazamos H0. Según el test, la serie es estacionaria.")
 
-# Nota: Según los resultados de la prueba ADF y KPSS, hay que 
+# Según los resultados de la prueba ADF y KPSS, hay que 
 #       diferenciar la serie.
 # %% Diferenciación de la serie (pues resultó NO estacionaria)
 cafe_serie_diff = cafe_serie.diff().dropna()
 
 # Gráfica de la diferencia del precio del café
 plt.figure(figsize=(10, 5))
-plt.plot(cafe_serie_diff)
+plt.plot(cafe_serie_diff, color=COLORES["diferencia"])
 plt.title("Serie diferenciada")
 plt.xlabel("Año")
-<<<<<<< Updated upstream
 plt.ylabel("Cambio en USD/kg")
 plt.grid(True, alpha=0.3)
 plt.savefig(RESULTADOS / "serie_diferenciada.png", dpi=300)
-=======
-plt.ylabel("Precio")
-plt.grid(True)
->>>>>>> Stashed changes
 plt.show()
 # %% Diferencia del logaritmo
 
@@ -175,17 +235,12 @@ cafe_serie_log_diff = np.log(cafe_serie).diff().dropna()
 
 # Gráfica de la diferencia del logaritmo del precio del café
 plt.figure(figsize=(10, 5))
-plt.plot(cafe_serie_log_diff)
+plt.plot(cafe_serie_log_diff, color=COLORES["log_diff"])
 plt.title("Diferencia del logaritmo de la serie original")
 plt.xlabel("Año")
-<<<<<<< Updated upstream
 plt.ylabel("Δ log(precio)")
 plt.grid(True, alpha=0.3)
 plt.savefig(RESULTADOS / "log_diferencia.png", dpi=300)
-=======
-plt.ylabel("Precio")
-plt.grid(True)
->>>>>>> Stashed changes
 plt.show()
 
 # %% FAC y FACP de la diferencia del logaritmo
@@ -200,6 +255,7 @@ plot_acf(
     ax=axes[0]
 )
 
+colorear_correlograma(axes[0], COLORES["fac"])
 axes[0].set_title("FAC de la diferencia del logaritmo")
 
 plot_pacf(
@@ -209,6 +265,7 @@ plot_pacf(
     ax=axes[1]
 )
 
+colorear_correlograma(axes[1], COLORES["facp"])
 axes[1].set_title("FACP de la diferencia del logaritmo")
 
 plt.tight_layout()
@@ -245,75 +302,32 @@ for orden in candidatos:
 print(pd.DataFrame(filas).sort_values("BIC"))
 #%% Identificación mediante criterios de Información
 #El modelo ARIMA(1, 1, 0) es el que tiene el menor BIC y AIC
-<<<<<<< Updated upstream
 #Los cuatro modelos pasan la prueba de Ljung-Box a 12 y 24 rezagos (p > 0.05).
 
 # %% =========================
 # Paso 1 (continuación): Prueba de estacionalidad
 # ============================
-=======
-#Sin embargo, ningún modelo pasa la prueba de Ljung-Box a 12 y 24 rezagos.
-# %% =========================
-# Paso 2: Estimación
-# ============================
-modelo_ar1 = SARIMAX(
-    np.log(cafe_serie),
-    order=(1, 1, 0),
-    trend="n",
-    enforce_stationarity=False,
-    enforce_invertibility=False
-)
 
-# Objeto tipo "SARIMAX" del paquete statmodels
-type(modelo_ar1)
+# Variación logarítmica mensual (serie estacionaria)
+dlog = np.log(cafe_serie).diff().dropna()
 
-#  Acá es donde se realiza la estimación del modelo AR(1)
-estimacion_ar1 = modelo_ar1.fit(disp=False)
+meses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+         "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
-# Nota: El método de estimación es máxima verosimilitud 
-#       sobre la representación del modelo en un espacio de estados
+# %% Gráfico por mes: distribución de la variación en cada mes del año
 
-# Objeto tipo "SARIMAXResultsWrapper"
-type(estimacion_ar1)
+grupos = [dlog[dlog.index.month == m] for m in range(1, 13)]
 
-# Se imprimen los resultados principales de la estimación
-# E.g. Coeficientes y significancia de los coeficientes
-print(estimacion_ar1.summary())
-# %%# =========================
-# Paso 3: Validación de supuestos
-# ============================
-
-# Residuales del modelo
-residuales = estimacion_ar1.resid.dropna()
-
-# Los residuales son un objeto tipo Pandas.Series
-type(residuales)
-
-# Gráfica de los residuales (deberían comportarse como ruido blanco)
 plt.figure(figsize=(10, 5))
-plt.plot(residuales.iloc[1:-1])
-plt.title("Residuales del modelo AR(1)")
-plt.xlabel("Fecha")
-plt.ylabel("Precio")
-plt.grid(True)
-plt.show()
-
-# Descripción de los residuales 
-print(residuales.describe())
-
-# %%FAC y FACP de los residuales
->>>>>>> Stashed changes
-
-fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-
-plot_acf(
-    residuales,
-    lags=24,
-    alpha=0.05,
-    bartlett_confint=False,
-    ax=axes[0]
+plt.boxplot(
+    grupos,
+    patch_artist=True,
+    boxprops=dict(facecolor=COLORES["estacional"], alpha=0.6, edgecolor=COLORES["estacional"]),
+    medianprops=dict(color="black"),
+    whiskerprops=dict(color=COLORES["estacional"]),
+    capprops=dict(color=COLORES["estacional"]),
+    flierprops=dict(markeredgecolor=COLORES["estacional"]),
 )
-<<<<<<< Updated upstream
 plt.xticks(range(1, 13), meses)
 plt.axhline(0, color="gray", linewidth=1)
 plt.title(
@@ -325,26 +339,11 @@ plt.xlabel("Mes")
 plt.ylabel("Δ log(precio)")
 plt.grid(True, alpha=0.3)
 plt.savefig(RESULTADOS / "estacionalidad_boxplot.png", dpi=300)
-=======
-
-axes[0].set_title("FAC de los residuales")
-
-plot_pacf(
-    residuales,
-    lags=24,
-    alpha=0.05,
-    ax=axes[1]
-)
-
-axes[1].set_title("FACP de los residuales")
-
-plt.tight_layout()
->>>>>>> Stashed changes
 plt.show()
 
-# %% Prueba Ljung-Box
+# Promedio de la variación por mes
+print(dlog.groupby(dlog.index.month).mean().set_axis(meses).round(4))
 
-<<<<<<< Updated upstream
 # %% Autocorrelaciones en los rezagos estacionales
 
 fac = acf(dlog, nlags=36)
@@ -365,48 +364,35 @@ datos = pd.DataFrame({"dlog": dlog, "mes": dlog.index.month})
 # heterocedasticidad (la prueba ARCH del Paso 3 muestra volatilidad agrupada)
 reg_mes = smf.ols("dlog ~ C(mes)", data=datos).fit(
     cov_type="HAC", cov_kwds={"maxlags": 12}
-=======
-ljung_box = acorr_ljungbox(
-    residuales,
-    lags=[6, 12, 18, 24],
-    return_df=True
->>>>>>> Stashed changes
 )
 
-print("Prueba Ljung-Box")
-print(ljung_box)
+# H0: todos los efectos de los meses son cero (no hay estacionalidad)
+R = np.eye(len(reg_mes.params))[1:]   # todos los coeficientes excepto el intercepto
+prueba_f = reg_mes.f_test(R)
 
-# H0: no hay autocorrelación en los residuos.
-# Si p-value > 0.05, no se rechaza H0.
+print("=== Prueba F de dummies mensuales ===")
+print(prueba_f)
 
-# %% FAC y FACP de los residuales al cuadrado
+if float(prueba_f.pvalue) < 0.05:
+    print("Se rechaza H0: hay evidencia de estacionalidad.")
+else:
+    print("No se rechaza H0: no hay evidencia de estacionalidad.")
 
-fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+# %% Prueba de Kruskal-Wallis (no paramétrica)
 
-<<<<<<< Updated upstream
 # No supone normalidad, lo cual es útil porque Jarque-Bera (Paso 3) la rechaza.
 # H0: la variación tiene la misma distribución en todos los meses.
 kw = kruskal(*grupos)
-=======
-plot_acf(
-    residuales**2,
-    lags=24,
-    alpha=0.05,
-    bartlett_confint=False,
-    ax=axes[0]
-)
->>>>>>> Stashed changes
 
-axes[0].set_title("FAC de los residuales al cuadrado")
+print("=== Prueba de Kruskal-Wallis ===")
+print("Estadístico H:", kw.statistic)
+print("p-valor:", kw.pvalue)
 
-plot_pacf(
-    residuales**2,
-    lags=24,
-    alpha=0.05,
-    ax=axes[1]
-)
+if kw.pvalue < 0.05:
+    print("Se rechaza H0: hay evidencia de estacionalidad.")
+else:
+    print("No se rechaza H0: no hay evidencia de estacionalidad.")
 
-<<<<<<< Updated upstream
 # %% =========================
 # Paso 2: Estimación
 # ============================
@@ -541,57 +527,13 @@ else:
 
 # A partir de la estimación del AR(1) se realizó el pronóstico
 
-# Pronóstico 12 pasos adelante
-pronostico_log = estimacion_ar1.get_forecast(steps=12)
+# Horizonte del pronóstico (en meses)
+HORIZONTE = 10
+
+# Pronóstico 10 pasos adelante
+pronostico_log = estimacion_ar1.get_forecast(steps=HORIZONTE)
 
 # Pronóstico puntual e intervalos de predicción del logaritmo del precio del café
-=======
-axes[1].set_title("FACP de los residuales al cuadrado")
-
-plt.tight_layout()
-plt.show()
-
-# %%Prueba ARCH de heterocedasticidad
-
-arch_test = het_arch(residuales, nlags=12) 
-
-print("Prueba ARCH")
-print("LM statistic:", arch_test[0])
-print("LM p-value:", arch_test[1])
-
-# H0: no hay efectos ARCH.
-# Si p-value > 0.05, no se rechaza H0.
-
-# %% Q-Q plot de los residuos
-
-plt.figure(figsize=(6, 6))
-probplot(residuales.iloc[1:-1], dist="norm", plot=plt)
-plt.title("Q-Q plot de los residuos")
-plt.grid(True)
-plt.show()
-
-# %% Prueba de normalidad Jarque-Bera
-
-jb_test = jarque_bera(residuales.iloc[1:-1])
-
-print("Prueba Jarque-Bera")
-print("Jarque-Bera statistic:", jb_test.statistic)
-print("Jarque-Bera p-value:", jb_test.pvalue)
-
-# H0: los residuos siguen una distribución normal.
-# Si p-value < 0.05, se rechaza H0.
-
-# %%=========================
-# PASO 4: Pronóstico
-# ============================
-
-# A partir de la estimación del AR(1) realizó el pronóstico
-
-# Protonóstico 10 pasos adelante
-pronostico_log = estimacion_ar1.get_forecast(steps=10)
-
-# Pronóstico puntual e intervalos de predicción del logaritmo de las exportaciones tradicionales
->>>>>>> Stashed changes
 pronostico_puntual_log = pronostico_log.predicted_mean
 varianza_pronostico_log = pronostico_log.var_pred_mean
 intervalos_log = pronostico_log.conf_int()
@@ -610,25 +552,30 @@ tabla_pronostico = pd.DataFrame({
 
 print(tabla_pronostico)
 
+# Periodo que cubre el pronóstico, para mostrarlo en las gráficas
+inicio_pron, fin_pron = pronostico_nivel.index[0], pronostico_nivel.index[-1]
+periodo_pronostico = (f"{meses[inicio_pron.month - 1]} {inicio_pron.year} – "
+                      f"{meses[fin_pron.month - 1]} {fin_pron.year}")
+print(f"Horizonte: {len(pronostico_nivel)} meses ({periodo_pronostico})")
+
+# Se muestran los últimos 10 años para que los meses pronosticados se distingan
+historia_reciente = cafe_serie.loc[cafe_serie.index >= cafe_serie.index[-1] - pd.DateOffset(years=10)]
+fin_eje = fin_pron + pd.DateOffset(months=2)  # El eje termina donde termina el pronóstico
+
 # Gráfica del pronóstico
 plt.figure(figsize=(10, 5))
-<<<<<<< Updated upstream
-plt.plot(cafe_serie, label="Datos históricos", color=COLORES["original"])
-plt.plot(pronostico_nivel, label="Pronóstico", color=COLORES["diferencia"])
-=======
-plt.plot(cafe_serie, label="Datos históricos")
-plt.plot(pronostico_nivel, label="Pronóstico", color="orange")
->>>>>>> Stashed changes
+plt.plot(historia_reciente, label="Datos históricos", color=COLORES["original"])
+plt.plot(pronostico_nivel, label=f"Pronóstico ({periodo_pronostico})", color=COLORES["diferencia"])
 plt.fill_between(
     pronostico_nivel.index,
     intervalos_nivel.iloc[:, 0],
     intervalos_nivel.iloc[:, 1],
-<<<<<<< Updated upstream
     color=COLORES["diferencia"],
     alpha=0.3,
     label="Intervalo de confianza"
 )
-plt.title("Pronóstico del precio del café arábigo a 12 meses (ARIMA(1,1,0))")
+plt.title(f"Pronóstico del precio del café arábigo a {HORIZONTE} meses (ARIMA(1,1,0))")
+plt.xlim(right=fin_eje)
 plt.xlabel("Fecha")
 plt.ylabel("USD por kilo")
 plt.legend(loc="upper left")
@@ -652,7 +599,7 @@ plt.show()
 # Este bootstrap mantiene fijo el coeficiente estimado (phi), así que
 #       no incluye la incertidumbre de la estimación de los parámetros.
 
-pasos = len(pronostico_nivel)  # Mismo horizonte que el pronóstico anterior
+pasos = HORIZONTE  # Mismo horizonte que el pronóstico anterior
 B_pron = 5000  # Número de trayectorias simuladas
 rng_pron = np.random.default_rng(2026)  # Semilla para que el resultado sea reproducible
 
@@ -693,11 +640,9 @@ print("=== Pronóstico con intervalos normales y por bootstrap (USD/kg) ===")
 print(tabla_bootstrap.to_string())
 
 # Gráfica: últimos 10 años + pronóstico con los dos intervalos
-historia_reciente = cafe_serie.loc[cafe_serie.index >= cafe_serie.index[-1] - pd.DateOffset(years=10)]
-
 plt.figure(figsize=(12, 6))
 plt.plot(historia_reciente, color=COLORES["original"], linewidth=2, label="Precio observado")
-plt.plot(pronostico_nivel, color="black", linewidth=2, linestyle="--", label="Pronóstico")
+plt.plot(pronostico_nivel, color="black", linewidth=2, linestyle="--", label=f"Pronóstico ({periodo_pronostico})")
 plt.fill_between(
     pronostico_nivel.index,
     intervalos_nivel.iloc[:, 0],
@@ -710,20 +655,14 @@ plt.plot(intervalos_boot["inferior"], color=COLORES["fac"], linewidth=1.5, label
 plt.plot(intervalos_boot["superior"], color=COLORES["fac"], linewidth=1.5)
 plt.axvline(cafe_serie.index[-1], color=COLORES["banda"], linewidth=1, linestyle=":")
 plt.title(
-    "Pronóstico del precio del café arábigo a 12 meses\n"
+    f"Pronóstico del precio del café arábigo a {HORIZONTE} meses\n"
     f"Intervalo normal frente a intervalo por bootstrap de residuales ({B_pron} trayectorias)",
     fontsize=12,
 )
+plt.xlim(right=fin_eje)
 plt.xlabel("Fecha")
 plt.ylabel("USD por kilo")
 plt.legend(loc="upper left")
 plt.grid(True, alpha=0.3)
 plt.savefig(RESULTADOS / "pronostico_bootstrap.png", dpi=300)
 plt.show()
-=======
-    color="orange",
-    alpha=0.3,
-    label="Intervalo de confianza"
-)
-# %%
->>>>>>> Stashed changes
