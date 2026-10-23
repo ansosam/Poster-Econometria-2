@@ -552,10 +552,20 @@ tabla_pronostico = pd.DataFrame({
 
 print(tabla_pronostico)
 
+# Periodo que cubre el pronóstico, para mostrarlo en las gráficas
+inicio_pron, fin_pron = pronostico_nivel.index[0], pronostico_nivel.index[-1]
+periodo_pronostico = (f"{meses[inicio_pron.month - 1]} {inicio_pron.year} – "
+                      f"{meses[fin_pron.month - 1]} {fin_pron.year}")
+print(f"Horizonte: {len(pronostico_nivel)} meses ({periodo_pronostico})")
+
+# Se muestran los últimos 10 años para que los meses pronosticados se distingan
+historia_reciente = cafe_serie.loc[cafe_serie.index >= cafe_serie.index[-1] - pd.DateOffset(years=10)]
+fin_eje = fin_pron + pd.DateOffset(months=2)  # El eje termina donde termina el pronóstico
+
 # Gráfica del pronóstico
 plt.figure(figsize=(10, 5))
-plt.plot(cafe_serie, label="Datos históricos", color=COLORES["original"])
-plt.plot(pronostico_nivel, label="Pronóstico", color=COLORES["diferencia"])
+plt.plot(historia_reciente, label="Datos históricos", color=COLORES["original"])
+plt.plot(pronostico_nivel, label=f"Pronóstico ({periodo_pronostico})", color=COLORES["diferencia"])
 plt.fill_between(
     pronostico_nivel.index,
     intervalos_nivel.iloc[:, 0],
@@ -565,6 +575,7 @@ plt.fill_between(
     label="Intervalo de confianza"
 )
 plt.title(f"Pronóstico del precio del café arábigo a {HORIZONTE} meses (ARIMA(1,1,0))")
+plt.xlim(right=fin_eje)
 plt.xlabel("Fecha")
 plt.ylabel("USD por kilo")
 plt.legend(loc="upper left")
@@ -588,7 +599,7 @@ plt.show()
 # Este bootstrap mantiene fijo el coeficiente estimado (phi), así que
 #       no incluye la incertidumbre de la estimación de los parámetros.
 
-pasos = len(pronostico_nivel)  # Mismo horizonte que el pronóstico anterior
+pasos = HORIZONTE  # Mismo horizonte que el pronóstico anterior
 B_pron = 5000  # Número de trayectorias simuladas
 rng_pron = np.random.default_rng(2026)  # Semilla para que el resultado sea reproducible
 
@@ -629,11 +640,9 @@ print("=== Pronóstico con intervalos normales y por bootstrap (USD/kg) ===")
 print(tabla_bootstrap.to_string())
 
 # Gráfica: últimos 10 años + pronóstico con los dos intervalos
-historia_reciente = cafe_serie.loc[cafe_serie.index >= cafe_serie.index[-1] - pd.DateOffset(years=10)]
-
 plt.figure(figsize=(12, 6))
 plt.plot(historia_reciente, color=COLORES["original"], linewidth=2, label="Precio observado")
-plt.plot(pronostico_nivel, color="black", linewidth=2, linestyle="--", label="Pronóstico")
+plt.plot(pronostico_nivel, color="black", linewidth=2, linestyle="--", label=f"Pronóstico ({periodo_pronostico})")
 plt.fill_between(
     pronostico_nivel.index,
     intervalos_nivel.iloc[:, 0],
@@ -650,6 +659,7 @@ plt.title(
     f"Intervalo normal frente a intervalo por bootstrap de residuales ({B_pron} trayectorias)",
     fontsize=12,
 )
+plt.xlim(right=fin_eje)
 plt.xlabel("Fecha")
 plt.ylabel("USD por kilo")
 plt.legend(loc="upper left")
