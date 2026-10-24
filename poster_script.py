@@ -272,6 +272,46 @@ plt.tight_layout()
 plt.savefig(RESULTADOS / "fac_facp_log_diferencia.png", dpi=300)
 plt.show()
 
+# %% Tests de Raíz Unitaria sobre la diferencia del logaritmo
+
+# Test de Augmented Dickey Fuller (ADF) sobre la diferencia del logaritmo
+adf_log_diff = adfuller(cafe_serie_log_diff)
+
+print("=== Test ADF (diferencia del logaritmo) ===")
+print("Estadístico ADF:", adf_log_diff[0])
+print("p-valor:", adf_log_diff[1])
+print("Rezagos usados:", adf_log_diff[2])
+print("Observaciones:", adf_log_diff[3])
+print("Valores críticos:")
+for nivel, valor in adf_log_diff[4].items():
+    print(f"{nivel}: {valor}")
+
+if adf_log_diff[1] < 0.05:
+    print("ADF: Rechazamos H0. Según el test, la serie es estacionaria.")
+else:
+    print("ADF: No rechazamos H0. Según el test, la serie no es estacionaria.")
+
+# Test KPSS sobre la diferencia del logaritmo
+# El p-valor de KPSS está acotado entre 0.01 y 0.10: si sale 0.10,
+#       el verdadero p-valor es mayor que 0.10.
+kpss_log_diff = kpss(cafe_serie_log_diff, regression="c", nlags="auto")
+
+print("\n=== Test KPSS (diferencia del logaritmo) ===")
+print("Estadístico KPSS:", kpss_log_diff[0])
+print("p-valor:", kpss_log_diff[1])
+print("Rezagos usados:", kpss_log_diff[2])
+print("Valores críticos:")
+for nivel, valor in kpss_log_diff[3].items():
+    print(f"{nivel}: {valor}")
+
+if kpss_log_diff[1] < 0.05:
+    print("KPSS: rechazamos H0. Según el test, la serie es no estacionaria.")
+else:
+    print("KPSS: no rechazamos H0. Según el test, la serie es estacionaria.")
+
+# Ambas pruebas indican que la diferencia del logaritmo es estacionaria,
+#       por lo que d = 1 sobre log(cafe_serie).
+
 # %% Identificación del modelo usando FAC y FACP
 
 # La FACP solo tiene significativo el primer rezago y luego se corta.
@@ -419,6 +459,39 @@ print(type(estimacion_ar1))
 # Se imprimen los resultados principales de la estimación
 # Como lo son los coeficientes y significancia de los coeficientes
 print(estimacion_ar1.summary())
+
+# %% Comparación con deriva
+
+# Se estima el mismo modelo agregando una constante (deriva) en la
+#       variación logarítmica, para ver si es significativa.
+estimacion_deriva = SARIMAX(
+    np.log(cafe_serie),
+    order=(1, 1, 0),
+    trend="c",
+    enforce_stationarity=False,
+    enforce_invertibility=False
+).fit(disp=False)
+
+print(estimacion_deriva.summary())
+
+comparacion_deriva = pd.DataFrame({
+    "phi (ar.L1)": [estimacion_ar1.params["ar.L1"], estimacion_deriva.params["ar.L1"]],
+    "Deriva (intercept)": [0.0, estimacion_deriva.params["intercept"]],
+    "AIC": [estimacion_ar1.aic, estimacion_deriva.aic],
+    "BIC": [estimacion_ar1.bic, estimacion_deriva.bic],
+}, index=["ARIMA(1,1,0) sin deriva", "ARIMA(1,1,0) con deriva"])
+comparacion_deriva = comparacion_deriva.round(
+    {"phi (ar.L1)": 4, "Deriva (intercept)": 4, "AIC": 4, "BIC": 4}
+)
+
+print("=== Comparación con y sin deriva ===")
+print(comparacion_deriva)
+print("p-valor de la deriva:", round(estimacion_deriva.pvalues["intercept"], 4))
+
+comparacion_deriva.to_csv(RESULTADOS / "comparacion_deriva.csv")
+
+# La deriva no es significativa y el modelo sin deriva tiene menores AIC y BIC,
+#       por lo que se mantiene el ARIMA(1,1,0) sin deriva.
 # %% =========================
 # Paso 3: Validación de supuestos
 # ============================
@@ -520,6 +593,41 @@ if arch_p < 0.05:
     print("Se rechaza H0: hay efectos ARCH (volatilidad agrupada).")
 else:
     print("No se rechaza H0: no hay efectos ARCH.")
+
+# %% FAC y FACP de los residuales al cuadrado
+
+# Si hay volatilidad agrupada, los residuales al cuadrado estarán
+#       autocorrelacionados aunque los residuales no lo estén.
+residuales_cuadrado = res_validos ** 2
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+plot_acf(
+    residuales_cuadrado,
+    lags=24,
+    alpha=0.05,
+    bartlett_confint=False,
+    ax=axes[0]
+)
+
+colorear_correlograma(axes[0], COLORES["fac"])
+axes[0].set_title("FAC de los residuales al cuadrado")
+
+plot_pacf(
+    residuales_cuadrado,
+    lags=24,
+    alpha=0.05,
+    ax=axes[1]
+)
+
+colorear_correlograma(axes[1], COLORES["facp"])
+axes[1].set_title("FACP de los residuales al cuadrado")
+
+plt.tight_layout()
+plt.savefig(RESULTADOS / "fac_residuales_cuadrado.png", dpi=300)
+plt.show()
+
+# Los primeros rezagos salen de la banda, lo que coincide con la prueba ARCH-LM.
 
 # %% =========================
 # Paso 4: Pronóstico
@@ -666,3 +774,84 @@ plt.legend(loc="upper left")
 plt.grid(True, alpha=0.3)
 plt.savefig(RESULTADOS / "pronostico_bootstrap.png", dpi=300)
 plt.show()
+
+# %% =========================
+# Validación fuera de muestra
+# ============================
+
+# Se reservan los últimos 10 meses, se estima el mismo modelo con el resto
+#       de la muestra y se compara el pronóstico con los precios reales.
+#       Como referencia se usa un paseo aleatorio (el pronóstico es el último precio).
+
+entrenamiento = cafe_serie.iloc[:-HORIZONTE]
+prueba = cafe_serie.iloc[-HORIZONTE:]
+
+estimacion_val = SARIMAX(
+    np.log(entrenamiento),
+    order=(1, 1, 0),
+    trend="n",
+    enforce_stationarity=False,
+    enforce_invertibility=False
+).fit(disp=False)
+
+pronostico_val_log = estimacion_val.get_forecast(steps=HORIZONTE)
+
+# Misma corrección por sesgo que en el pronóstico principal
+pronostico_val = np.exp(
+    pronostico_val_log.predicted_mean + 0.5 * pronostico_val_log.var_pred_mean
+)
+intervalos_val = np.exp(pronostico_val_log.conf_int())
+
+# Paseo aleatorio: el último precio observado se repite en todo el horizonte
+pronostico_paseo = pd.Series(entrenamiento.iloc[-1], index=prueba.index)
+
+
+def metricas(real, pronostico):
+    """Calcula RMSE, MAE y MAPE (%) entre los valores reales y el pronóstico."""
+    error = real.values - pronostico.values
+    return {
+        "RMSE": np.sqrt(np.mean(error ** 2)),
+        "MAE": np.mean(np.abs(error)),
+        "MAPE (%)": np.mean(np.abs(error) / real.values) * 100,
+    }
+
+
+metricas_val = pd.DataFrame({
+    "ARIMA(1,1,0)": metricas(prueba, pronostico_val),
+    "Paseo aleatorio": metricas(prueba, pronostico_paseo),
+}).round(3)
+
+print("=== Validación fuera de muestra (últimos 10 meses) ===")
+print(metricas_val)
+
+metricas_val.to_csv(RESULTADOS / "metricas_fuera_de_muestra.csv")
+
+# Gráfica: últimos años del entrenamiento + meses reservados + pronóstico
+historia_val = entrenamiento.iloc[-100:]
+
+plt.figure(figsize=(10, 4.5))
+plt.plot(historia_val, color=COLORES["original"], linewidth=2, label="Precio observado (entrenamiento)")
+plt.plot(prueba, color=COLORES["original"], linewidth=2, linestyle=":", marker="o",
+         markersize=4, label="Precio real (meses reservados)")
+plt.plot(pronostico_val, color=COLORES["diferencia"], linewidth=2, linestyle="--", marker="s",
+         markersize=4, label="Pronóstico ARIMA(1,1,0)")
+plt.fill_between(
+    pronostico_val.index,
+    intervalos_val.iloc[:, 0],
+    intervalos_val.iloc[:, 1],
+    color=COLORES["diferencia"],
+    alpha=0.15,
+    label="Intervalo de predicción del 95%"
+)
+plt.axvline(entrenamiento.index[-1], color=COLORES["banda"], linewidth=1, linestyle=":")
+plt.title(f"Evaluación fuera de muestra: últimos {HORIZONTE} meses")
+plt.xlabel("Fecha")
+plt.ylabel("USD por kilo")
+plt.legend(loc="upper left")
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig(RESULTADOS / "validacion_fuera_de_muestra.png", dpi=300)
+plt.show()
+
+# El paseo aleatorio tiene menores errores que el ARIMA(1,1,0) en estos 10 meses:
+#       el modelo no mejora el pronóstico ingenuo en este periodo.
